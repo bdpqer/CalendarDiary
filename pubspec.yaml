@@ -1,0 +1,57 @@
+name: calendardiary
+description: "日历日记 —— 保留完整日历功能，黄历升级为多媒体日记"
+publish_to: 'none'
+version: 4.2.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 中文本地化（日期/时间选择器等 Material 组件显示中文）
+  flutter_localizations:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # 农历 / 干支 / 生肖 / 节气 算法
+  lunar: ^1.7.4
+
+  # 数据库
+  sqflite: ^2.4.1
+  path: ^1.9.0
+  path_provider: ^2.1.5
+
+  # 媒体采集与播放
+  image_picker: ^1.2.2
+  record: ^6.0.0
+  video_player: ^2.10.0
+  audioplayers: ^6.4.0
+
+  # 本地通知 / 闹钟提醒（事项提醒）
+  flutter_local_notifications: ^17.2.0
+  timezone: ^0.9.2
+
+  # 工具
+  intl: ^0.20.2
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+# 本地补丁：用 setCommunicationDevice(API31+) 替换 audioplayers_android 中已废弃的
+# AudioManager.isSpeakerphoneOn，消除两条 deprecation 编译警告。
+# 上游修复后可移除本覆盖并删除 patched_audioplayers_android 目录。
+dependency_overrides:
+  audioplayers_android:
+    path: patched_audioplayers_android
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # 「历史上的今天」数据（按 MM-DD 索引，已转简体）
+    - assets/history_in_today.json

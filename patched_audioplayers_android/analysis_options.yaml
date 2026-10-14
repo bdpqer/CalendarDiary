@@ -1,0 +1,4 @@
+# 本地补丁包：仅以 path 覆盖参与主工程构建，自身不执行 pub get。
+# 上游原文件 include 的 flame_lint 不会随 path 覆盖安装，
+# 会报 include_file_not_found 噪声；这里不引入任何 include，
+# 代码风格统一由主工程的 analysis_options.yaml 约束。
