@@ -20,6 +20,12 @@ class DiaryListPage extends StatefulWidget {
 
 class _DiaryListPageState extends State<DiaryListPage> {
   List<DiaryEntryView> _items = [];
+
+  /// 未过滤的全量列表。
+  ///
+  /// 搜索必须在输入时即时过滤，而 `_reload()` 只在加载/刷新时才跑——
+  /// 没有这份全量副本，`_onSearch` 就只能改关键词、改不了列表。
+  List<DiaryEntryView> _all = [];
   bool _loading = true;
   String? _error;
   String _query = '';
@@ -46,7 +52,8 @@ class _DiaryListPageState extends State<DiaryListPage> {
       final all = await DiaryRepository.loadAll();
       if (!mounted) return;
       setState(() {
-        _items = _filter(all);
+        _all = all;
+        _items = _filter(_all);
         _loading = false;
         _error = null;
       });
@@ -66,7 +73,12 @@ class _DiaryListPageState extends State<DiaryListPage> {
   }
 
   void _onSearch(String v) {
-    setState(() => _query = v.trim());
+    final q = v.trim();
+    if (q == _query) return;
+    setState(() {
+      _query = q;
+      _items = _filter(_all);
+    });
   }
 
   Future<void> _openWrite() async {
