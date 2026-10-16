@@ -61,12 +61,20 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _onBiometric() async {
-    final ok = await AppLockService.instance.authenticate();
+    final svc = AppLockService.instance;
+    // 先确认设备仍支持生物识别，避免无谓弹窗或静默失败
+    final avail = await svc.canUseBiometrics();
+    if (!mounted) return;
+    if (!avail) {
+      setState(() => _error = '该设备暂不支持指纹解锁，请使用密码');
+      return;
+    }
+    final ok = await svc.authenticate();
     if (!mounted) return;
     if (ok) {
       widget.onUnlocked();
     } else {
-      setState(() => _error = '指纹识别未通过');
+      setState(() => _error = '指纹识别未通过，请重试');
     }
   }
 

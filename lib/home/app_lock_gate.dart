@@ -23,6 +23,9 @@ class _AppLockGateState extends State<AppLockGate>
   bool _ready = false;
   bool _locked = false;
   DateTime? _pausedAt;
+  /// 上次成功解锁的时间；用于区分「真正离开前台」与「认证对话框关闭后的伪 resume」，
+  /// 避免指纹/密码解锁成功后因伪 resume 被立刻重锁（表现为「解锁后还要再输密码」）。
+  DateTime? _unlockedAt;
 
   @override
   void initState() {
@@ -34,10 +37,12 @@ class _AppLockGateState extends State<AppLockGate>
   Future<void> _init() async {
     final svc = AppLockService.instance;
     if (!svc.available) {
-      if (mounted) setState(() {
-        _ready = true;
-        _locked = false;
-      });
+      if (mounted) {
+        setState(() {
+          _ready = true;
+          _locked = false;
+        });
+      }
       return;
     }
     await svc.init();
@@ -62,13 +67,21 @@ class _AppLockGateState extends State<AppLockGate>
     if (state == AppLifecycleState.paused) {
       _pausedAt = DateTime.now();
     } else if (state == AppLifecycleState.resumed) {
-      final mode = svc.lockMode;
-      final shouldLock = switch (mode) {
-        LockMode.always => true,
-        LockMode.launch => false,
-        LockMode.delayed => _delayedExceeded(),
-      };
-      if (shouldLock && mounted && !_locked) setState(() => _locked = true);
+      // 仅当 App 真正离开过前台（paused 发生在上次解锁之后）才重新锁定。
+      // 否则指纹/密码认证对话框关闭时系统会再派发一次 resumed，若直接重锁，
+      // 会让刚解锁成功的界面又被锁上，表现为「指纹解锁后还要再输密码」。
+      final reallyLeft = _pausedAt != null &&
+          (_unlockedAt == null || _pausedAt!.isAfter(_unlockedAt!));
+      if (reallyLeft) {
+        final mode = svc.lockMode;
+        final shouldLock = switch (mode) {
+          LockMode.always => true,
+          LockMode.launch => false,
+          LockMode.delayed => _delayedExceeded(),
+        };
+        if (shouldLock && mounted && !_locked) setState(() => _locked = true);
+      }
+      _pausedAt = null;
     }
   }
 
@@ -90,7 +103,10 @@ class _AppLockGateState extends State<AppLockGate>
       return LockScreen(
         biometricEnabled: AppLockService.instance.biometricEnabled,
         onUnlocked: () {
-          if (mounted) setState(() => _locked = false);
+          if (mounted) {
+            _unlockedAt = DateTime.now();
+            setState(() => _locked = false);
+          }
         },
       );
     }

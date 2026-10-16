@@ -11,6 +11,13 @@ void main() {
     // 区创建，不会被 AutomatedTestWidgetsFlutterBinding 的 fakeAsync 定时器断言拦下。
     await tester.runAsync(() async {
       await tester.pumpWidget(const WannianDiaryApp());
+      // AppLockGate 初始化（异步读 SharedPreferences）完成后才渲染主页，
+      // 轮询等待 MaterialApp 出现。
+      for (var i = 0; i < 100; i++) {
+        await tester.pump();
+        if (find.byType(MaterialApp).evaluate().isNotEmpty) break;
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
       // 应用顶层为 MaterialApp，且能完成首帧构建
       expect(find.byType(MaterialApp), findsOneWidget);
       await tester.pump();

@@ -100,11 +100,15 @@ class AppLockService {
   }
 
   /// 发起一次生物识别认证；成功返回 true。
+  ///
+  /// [sensitiveTransaction] 设 false：去掉部分机型在指纹识别成功后的额外
+  /// 「确认」步骤，做到刷一下即进入，避免「解锁后还要再确认/输密码」的割裂感。
   Future<bool> authenticate() async {
     try {
       return await _auth.authenticate(
         localizedReason: '解锁日历日记',
         biometricOnly: true,
+        sensitiveTransaction: false,
       );
     } catch (_) {
       return false;
