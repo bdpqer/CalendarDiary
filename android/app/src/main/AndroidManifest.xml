@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 精确闹钟（事项提醒） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- 指纹 / 生物识别解锁 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <!-- 后台响铃需要前台服务（国产 ROM 会压制后台直接播放的音频） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>

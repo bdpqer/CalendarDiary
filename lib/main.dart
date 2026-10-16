@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'home/app_lock_gate.dart';
 import 'home/homepage.dart';
 import 'user_data/diary_database.dart';
 import 'user_data/task_reminder.dart';
@@ -75,7 +76,7 @@ class WannianDiaryApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const HomePage(),
+      home: const AppLockGate(child: HomePage()),
     );
   }
 }

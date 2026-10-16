@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../date_base/almanac.dart';
 import '../date_base/holiday_data.dart';
+import '../user_data/app_lock.dart';
+import 'lock_screen.dart';
 import '../user_data/diary_database.dart';
 import '../user_data/task_reminder.dart';
 import '../theme/app_colors.dart';
@@ -40,11 +42,19 @@ class _SettingsPageState extends State<SettingsPage> {
   /// （首页是 IndexedStack，本页常驻不重建，不订阅就不会更新）
   StreamSubscription<void>? _diarySub;
 
+  // ---- 隐私与安全（应用锁） ----
+  bool _lockEnabled = false;
+  bool _hasPin = false;
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
+  LockMode _lockMode = LockMode.always;
+
   @override
   void initState() {
     super.initState();
     _loadStats();
     _loadReminderHealth();
+    _loadLockStatus();
     _diarySub = DiaryDatabase.diaryChanged.stream.listen((_) => _loadStats());
   }
 
@@ -60,6 +70,23 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _channelImportance = imp;
       _ignoringBatteryOptimizations = ignoring;
+    });
+  }
+
+  /// 加载应用锁当前配置（开关 / 是否设过 PIN / 指纹 / 锁定时机）。
+  Future<void> _loadLockStatus() async {
+    final svc = AppLockService.instance;
+    await svc.init();
+    if (!mounted) return;
+    final hasPin = await svc.hasPin();
+    final bioAvail = await svc.canUseBiometrics();
+    if (!mounted) return;
+    setState(() {
+      _hasPin = hasPin;
+      _lockEnabled = svc.enabled && hasPin;
+      _biometricEnabled = svc.biometricEnabled;
+      _lockMode = svc.lockMode;
+      _biometricAvailable = bioAvail;
     });
   }
 
@@ -97,6 +124,88 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {
       if (mounted) setState(() => _loaded = true);
     }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ----------------- 应用锁交互 -----------------
+
+  Future<void> _onToggleLock(bool v) async {
+    if (v) {
+      // 开启：引导设置 PIN
+      final pin = await _showPinSetup();
+      if (pin == null) {
+        setState(() {}); // 取消，开关回到关
+        return;
+      }
+      await AppLockService.instance.setPin(pin);
+      await AppLockService.instance.setEnabled(true);
+      await _loadLockStatus();
+    } else {
+      // 关闭：需验证 PIN 确认（防误关）
+      final verified = await _showPinVerify();
+      if (verified != true) {
+        setState(() {});
+        return;
+      }
+      await AppLockService.instance.clearPin();
+      await AppLockService.instance.setEnabled(false);
+      await AppLockService.instance.setBiometric(false);
+      await _loadLockStatus();
+    }
+  }
+
+  Future<void> _onChangePin() async {
+    final ok = await _showPinVerify();
+    if (ok != true) return;
+    final pin = await _showPinSetup();
+    if (pin == null) return;
+    await AppLockService.instance.setPin(pin);
+    await _loadLockStatus();
+  }
+
+  Future<void> _onToggleBiometric(bool v) async {
+    if (v) {
+      final avail = await AppLockService.instance.canUseBiometrics();
+      if (!avail) {
+        _toast('该设备尚未录入指纹，请先在系统设置中录入');
+        setState(() {});
+        return;
+      }
+      final ok = await AppLockService.instance.authenticate();
+      if (!ok) {
+        setState(() {});
+        return;
+      }
+      await AppLockService.instance.setBiometric(true);
+      setState(() => _biometricEnabled = true);
+    } else {
+      await AppLockService.instance.setBiometric(false);
+      setState(() => _biometricEnabled = false);
+    }
+  }
+
+  Future<void> _onChangeLockMode(LockMode m) async {
+    await AppLockService.instance.setLockMode(m);
+    setState(() => _lockMode = m);
+  }
+
+  Future<String?> _showPinSetup() {
+    return showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _PinSetupSheet(),
+    );
+  }
+
+  Future<bool?> _showPinVerify() {
+    return showModalBottomSheet<bool?>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _PinVerifySheet(),
+    );
   }
 
   Future<void> _confirmClearAll() async {
@@ -200,6 +309,41 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         const SizedBox(height: 16),
+
+        // 隐私与安全（应用锁）
+        _Section(title: '隐私与安全', children: [
+          _SwitchRow(
+            label: '密码锁',
+            value: _lockEnabled,
+            onChanged: _onToggleLock,
+          ),
+          if (_lockEnabled) ...[
+            if (_hasPin)
+              _ActionRow(label: '修改密码', onTap: _onChangePin),
+            _SwitchRow(
+              label: '指纹解锁',
+              value: _biometricEnabled,
+              onChanged: _onToggleBiometric,
+            ),
+            if (!_biometricAvailable)
+              const _InfoRow(
+                label: '提示',
+                value: '当前设备未录入指纹，无法启用指纹解锁。',
+              ),
+            _OptionRow<LockMode>(
+              label: '锁定时机',
+              value: _lockMode,
+              options: LockMode.values,
+              labelOf: (m) => m.label,
+              onChanged: _onChangeLockMode,
+            ),
+          ],
+          const _InfoRow(
+            label: '说明',
+            value: '开启后，进入应用或回到前台需输入密码；设备支持时可改用指纹解锁。'
+                '这是界面锁，已加密保管密码，但不加密日记数据库本身。',
+          ),
+        ]),
 
         // 日记统计
         _Section(title: '日记统计', children: [
@@ -317,6 +461,265 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
+// ----------------- 应用锁相关组件 -----------------
+
+/// 带开关的设置行。
+class _SwitchRow extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SwitchRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () => onChanged(!value),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Text(label,
+                  style: const TextStyle(fontSize: 14, color: AppColors.textBody)),
+              const Spacer(),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeThumbColor: AppColors.primary,
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+/// 单选选项行（如锁定时机）。
+class _OptionRow<T> extends StatelessWidget {
+  final String label;
+  final T value;
+  final List<T> options;
+  final String Function(T) labelOf;
+  final ValueChanged<T> onChanged;
+
+  const _OptionRow({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.labelOf,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: const TextStyle(fontSize: 14, color: AppColors.textBody)),
+            const SizedBox(height: 8),
+            ...options.map((o) => InkWell(
+                  onTap: () => onChanged(o),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        Icon(
+                          o == value
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_off,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(labelOf(o),
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.textBody)),
+                      ],
+                    ),
+                  ),
+                )),
+          ],
+        ),
+      );
+}
+
+/// PIN 圆点指示器（设置页内联用）。
+class _PinDots extends StatelessWidget {
+  final int count;
+  final int filled;
+
+  const _PinDots({required this.count, required this.filled});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(count, (i) {
+          final on = i < filled;
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: on ? AppColors.primary : Colors.transparent,
+              border: Border.all(color: AppColors.primary, width: 1.5),
+            ),
+          );
+        }),
+      );
+}
+
+/// 设置新 PIN：第一步输入，达到 4 位进入确认，第二步再次输入一致即完成。
+class _PinSetupSheet extends StatefulWidget {
+  const _PinSetupSheet();
+
+  @override
+  State<_PinSetupSheet> createState() => _PinSetupSheetState();
+}
+
+class _PinSetupSheetState extends State<_PinSetupSheet> {
+  final List<String> _first = [];
+  List<String> _second = [];
+  String? _err;
+  bool _confirm = false;
+
+  void _onKey(String k) {
+    if (k == 'del') {
+      setState(() {
+        if (_confirm) {
+          if (_second.isNotEmpty) _second.removeLast();
+        } else {
+          if (_first.isNotEmpty) _first.removeLast();
+        }
+        _err = null;
+      });
+      return;
+    }
+    if (_confirm) {
+      if (_second.length >= 6) return;
+      setState(() => _second.add(k));
+      if (_second.length == _first.length) _check();
+    } else {
+      if (_first.length >= 6) return;
+      setState(() => _first.add(k));
+      if (_first.length >= 4) setState(() => _confirm = true);
+    }
+  }
+
+  void _check() {
+    if (_second.join() == _first.join()) {
+      Navigator.of(context).pop(_first.join());
+    } else {
+      setState(() {
+        _err = '两次输入不一致，请重新设置';
+        _confirm = false;
+        _second = [];
+        _first.clear();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filled = _confirm ? _second.length : _first.length;
+    final count = _confirm ? _first.length : 6; // 确认阶段按首输长度显示
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_confirm ? '再次输入以确认' : '设置解锁密码',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _PinDots(count: count, filled: filled),
+            const SizedBox(height: 8),
+            if (_err != null)
+              Text(_err!, style: const TextStyle(color: AppColors.red, fontSize: 13)),
+            const SizedBox(height: 16),
+            PinPad(onKey: _onKey),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('取消'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 验证当前 PIN：输入达到设定长度即校验，成功返回 true。
+class _PinVerifySheet extends StatefulWidget {
+  const _PinVerifySheet();
+
+  @override
+  State<_PinVerifySheet> createState() => _PinVerifySheetState();
+}
+
+class _PinVerifySheetState extends State<_PinVerifySheet> {
+  final List<String> _d = [];
+  String? _err;
+
+  Future<void> _onKey(String k) async {
+    if (k == 'del') {
+      setState(() {
+        if (_d.isNotEmpty) _d.removeLast();
+        _err = null;
+      });
+      return;
+    }
+    if (_d.length >= 6) return;
+    setState(() => _d.add(k));
+    if (_d.length == AppLockService.instance.pinLength) {
+      final ok = await AppLockService.instance.verifyPin(_d.join());
+      if (!mounted) return;
+      if (ok) {
+        Navigator.of(context).pop(true);
+      } else {
+        setState(() {
+          _err = '密码错误';
+          _d.clear();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('输入当前密码',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _PinDots(
+              count: AppLockService.instance.pinLength,
+              filled: _d.length,
+            ),
+            const SizedBox(height: 8),
+            if (_err != null)
+              Text(_err!, style: const TextStyle(color: AppColors.red, fontSize: 13)),
+            const SizedBox(height: 16),
+            PinPad(onKey: _onKey),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('取消'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _Section extends StatelessWidget {
   const _Section({required this.title, required this.children});
 
@@ -382,7 +785,9 @@ class _InfoRow extends StatelessWidget {
           children: [
             Text(label, style: const TextStyle(fontSize: 14, color: AppColors.textBody)),
             const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontSize: 12, color: AppColors.textFaint, height: 1.5)),
+            Text(value,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textFaint, height: 1.5)),
           ],
         ),
       );
