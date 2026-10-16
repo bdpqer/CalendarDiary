@@ -41,6 +41,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  sqflite_common_ffi: ^2.4.4
 
 # 本地补丁：用 setCommunicationDevice(API31+) 替换 audioplayers_android 中已废弃的
 # AudioManager.isSpeakerphoneOn，消除两条 deprecation 编译警告。
