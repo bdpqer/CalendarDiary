@@ -12,7 +12,13 @@ import '../theme/app_colors.dart';
 
 /// 日记总览列表（按时间倒序）
 class DiaryListPage extends StatefulWidget {
-  const DiaryListPage({super.key});
+  const DiaryListPage({super.key, this.loader});
+
+  /// 列表数据加载器。
+  ///
+  /// 默认走真实仓库（[DiaryRepository.loadAll]）；测试注入假数据，
+  /// 使 widget 测试不必依赖 sqflite 文件库与 path_provider。
+  final Future<List<DiaryEntryView>> Function({int limit})? loader;
 
   @override
   State<DiaryListPage> createState() => _DiaryListPageState();
@@ -49,7 +55,7 @@ class _DiaryListPageState extends State<DiaryListPage> {
   Future<void> _reload() async {
     setState(() => _loading = true);
     try {
-      final all = await DiaryRepository.loadAll();
+      final all = await (widget.loader ?? DiaryRepository.loadAll)();
       if (!mounted) return;
       setState(() {
         _all = all;
@@ -69,8 +75,41 @@ class _DiaryListPageState extends State<DiaryListPage> {
   List<DiaryEntryView> _filter(List<DiaryEntryView> all) {
     if (_query.isEmpty) return all;
     final q = _query.toLowerCase();
-    return all.where((e) => e.content.toLowerCase().contains(q)).toList();
+    return all.where((e) {
+      if (e.content.toLowerCase().contains(q)) return true;
+      return _matchDate(e.date, q);
+    }).toList();
   }
+
+  /// 日期匹配（与内容匹配取并集），兼容常见书写形式：
+  ///
+  /// - 变体形式：`2026-10-15`、`2026/10/15`、`2026年10月15日`、`10-15`、`10.15`、
+  ///   `10月15日`（补零/不补零均收录）。搜「10月」只命中 10 月，搜「15」命中 15 日。
+  /// - 紧凑数字：查询去掉非数字字符后 ≥4 位时，与 `yyyyMMdd` 紧凑串比对，
+  ///   覆盖 `20261015`、`1015` 这类无分隔输入。
+  bool _matchDate(DateTime d, String q) {
+    final variants = <String>[
+      '${d.year}-${_two(d.month)}-${_two(d.day)}',
+      '${d.year}/${d.month}/${d.day}',
+      '${d.year}年${d.month}月${d.day}日',
+      '${_two(d.month)}-${_two(d.day)}',
+      '${d.month}-${d.day}',
+      '${d.month}月${d.day}日',
+      '${_two(d.month)}月${_two(d.day)}日',
+      '${d.month}.${d.day}',
+      '${_two(d.month)}.${_two(d.day)}',
+    ];
+    if (variants.join('\n').toLowerCase().contains(q)) return true;
+    final digits = q.replaceAll(_nonDigit, '');
+    if (digits.length >= 4) {
+      return '${d.year}${_two(d.month)}${_two(d.day)}'.contains(digits);
+    }
+    return false;
+  }
+
+  static final RegExp _nonDigit = RegExp('[^0-9]');
+
+  static String _two(int n) => n.toString().padLeft(2, '0');
 
   void _onSearch(String v) {
     final q = v.trim();
@@ -112,7 +151,7 @@ class _DiaryListPageState extends State<DiaryListPage> {
                   onChanged: _onSearch,
                   style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: '搜索日记内容',
+                    hintText: '搜索日记内容或日期',
                     prefixIcon: const Icon(Icons.search, size: 18),
                     isDense: true,
                     filled: true,
