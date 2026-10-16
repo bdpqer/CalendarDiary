@@ -27,6 +27,15 @@ class _SettingsPageState extends State<SettingsPage> {
   int _withMedia = 0;
   bool _loaded = false;
 
+  /// 「事项提醒」渠道的实际重要性；null = 尚未创建 / 查询失败。
+  ///
+  /// 用于检测系统是否把渠道从「高」静默降级 —— 降级后通知仍会送达，
+  /// 但不再弹出横幅、锁屏不显内容，用户极易误判为「闹钟没响」。
+  int? _channelImportance;
+
+  /// 是否已在「电池优化不受限制」名单中。
+  bool _ignoringBatteryOptimizations = false;
+
   /// 订阅日记增删：任意入口写/删/清空日记后，统计数字即时刷新
   /// （首页是 IndexedStack，本页常驻不重建，不订阅就不会更新）
   StreamSubscription<void>? _diarySub;
@@ -35,7 +44,38 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadStats();
+    _loadReminderHealth();
     _diarySub = DiaryDatabase.diaryChanged.stream.listen((_) => _loadStats());
+  }
+
+  /// 加载提醒可靠性相关的两项实测状态。
+  ///
+  /// 用户可能刚在系统设置里改过，回到本页时（`initState` 只跑一次，
+  /// 因为本页常驻于 IndexedStack）需要能刷新，故同时挂在下拉刷新里。
+  Future<void> _loadReminderHealth() async {
+    final imp = await TaskReminderService.instance.channelImportance();
+    final ignoring =
+        await TaskReminderService.instance.isIgnoringBatteryOptimizations();
+    if (!mounted) return;
+    setState(() {
+      _channelImportance = imp;
+      _ignoringBatteryOptimizations = ignoring;
+    });
+  }
+
+  /// 渠道实际重要性的中文描述（对齐 Android `NotificationManager` 常量）。
+  String get _channelImportanceText {
+    final v = _channelImportance;
+    if (v == null || v < 0) return '尚未创建（发一次通知后生效）';
+    return switch (v) {
+      5 => '最高（紧急）',
+      4 => '高（推荐）',
+      3 => '默认 ⚠️ 建议调高',
+      2 => '低 ⚠️ 建议调高',
+      1 => '最低 ⚠️ 建议调高',
+      0 => '已关闭 ⚠️ 提醒不会显示',
+      _ => '未知（$v）',
+    };
   }
 
   @override
@@ -192,6 +232,64 @@ class _SettingsPageState extends State<SettingsPage> {
             label: '说明',
             value: '「闹钟提醒」依赖系统精确闹钟权限。Android 14及以上默认不授予，'
                 '未开启时提醒会自动降级为「近似提醒」，可能延迟几分钟。',
+          ),
+        ]),
+
+        // 提醒可靠性：实测评测 + 修复引导
+        //
+        // 下面两项都不是「开关」而是「体检报告」：提醒能否被感知、能否在后台
+        // 存活，都取决于系统侧的真实配置，代码里改不动，只能实测出来并引导用户。
+        _Section(title: '提醒可靠性', children: [
+          _StatRow(
+            label: '通知重要度',
+            value: _channelImportanceText,
+          ),
+          _ActionRow(
+            label: '去调整通知重要度',
+            onTap: () async {
+              final ok = await TaskReminderService.instance.openNotificationSettings();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(ok
+                      ? '请在系统设置中找到「日历日记」，把「事项提醒」设为「重要」'
+                      : '无法打开系统通知设置，请手动前往应用设置'),
+                ),
+              );
+              // 用户跳走期间状态会变，回到本页时重新体检
+              await _loadReminderHealth();
+            },
+          ),
+          _StatRow(
+            label: '后台运行',
+            value: _ignoringBatteryOptimizations ? '不受限制（推荐）' : '受系统限制',
+          ),
+          _ActionRow(
+            label: '设为电池优化不限制',
+            onTap: () async {
+              final ok =
+                  await TaskReminderService.instance.openBatteryOptimizationSettings();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(ok
+                      ? '请在系统设置中选择「允许后台活动/不受限制」'
+                      : '无法打开系统设置，请手动前往应用管理开启后台运行'),
+                ),
+              );
+              await _loadReminderHealth();
+            },
+          ),
+          const _InfoRow(
+            label: '为何重要',
+            value: '通知重要度被降级时，通知仍会送达但不弹横幅、锁屏不显示内容，'
+                '容易误以为「闹钟没响」；后台受限则可能导致闹钟被系统休眠压制甚至丢弃。',
+          ),
+          const _InfoRow(
+            label: '提醒失效自查',
+            value: '若闹钟没响，请依次确认：① 通知重要度为「重要」；② 电池优化不受限制；'
+                '③ 未对应用执行「强制停止」—— 强制停止会清空该应用的全部系统闹钟登记，'
+                '需重新打开一次本应用才会恢复。',
           ),
         ]),
 

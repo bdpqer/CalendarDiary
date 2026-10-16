@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../user_data/diary_database.dart';
 import '../user_data/diary_list_page.dart';
+import '../user_data/task_reminder.dart';
 import 'calendar_list/calendar_view.dart';
 import 'day_detail_widget.dart';
 import 'settings_page.dart';
@@ -95,7 +96,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _loadDiaryDays();
+    if (state != AppLifecycleState.resumed) return;
+    _loadDiaryDays();
+    // 切回前台时重排未到期提醒。
+    //
+    // `rescheduleAll()` 原本只在冷启动（`TaskReminderService.init`）时跑一次，
+    // 但系统会主动清空闹钟登记：应用被「强制停止」时，该包在 AlarmManager
+    // 中的所有闹钟都会被注销（`stopped=true`，连广播都拦），且不会重试。
+    // 这条路径下用户不重新打开 App 就永久失聪；一旦他切回来，就是最可靠的
+    // 补救时机 —— 重排是幂等的（重复登记同一条闹钟），代价仅一次数据库查询。
+    unawaited(TaskReminderService.instance.rescheduleAll());
   }
 
   void _onScroll() {

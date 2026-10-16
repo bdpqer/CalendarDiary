@@ -205,7 +205,7 @@ class TaskReminderService {
     }
   }
 
-  /// 重排所有未到期提醒（启动 / 开机广播时调用）
+  /// 重排所有未到期提醒（冷启动 / 开机广播 / 切回前台时调用）
   Future<void> rescheduleAll() async {
     try {
       final list = await DiaryDatabase.instance.pendingReminders();
@@ -219,6 +219,71 @@ class TaskReminderService {
     } catch (e) {
       // 重排失败不影响主流程
       debugPrint('[TaskReminder] 重排异常: $e');
+    }
+  }
+
+  // ─────────────────────── 提醒可靠性：渠道重要性 ───────────────────────
+
+  /// 「事项提醒」渠道当前的**实际**重要性；`null` 表示渠道尚未创建。
+  ///
+  /// 渠道一旦创建，importance 会被系统或用户固化 —— 改代码里的 `Importance.max`
+  /// 是无效的。实测发现部分 ROM 会把HIGH 静默降级为 DEFAULT（`mUserLockedFields=0`
+  /// 说明并非用户操作），表现为到点通知不弹横幅、锁屏不显内容，用户误以为没响。
+  /// 因此必须在运行时读真实值，再引导用户手动调回「重要」。
+  Future<int?> channelImportance() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _alarm.invokeMethod<int>('channelImportance');
+    } catch (e) {
+      debugPrint('[TaskReminder] 读取渠道重要性失败: $e');
+      return null;
+    }
+  }
+
+  /// 渠道重要性是否低于「高」（Android 5 及以上 [Importance.high] = 4）。
+  ///
+  /// `null`（渠道未创建）视为正常：此时尚未发过通知，用户无需处理。
+  Future<bool> isChannelImportanceDowngraded() async {
+    final v = await channelImportance();
+    if (v == null || v < 0) return false;
+    return v < 4;
+  }
+
+  /// 跳转到本应用的系统「通知」设置页，供用户把渠道重要度调回「重要」。
+  Future<bool> openNotificationSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _alarm.invokeMethod<bool>('openNotificationSettings') ?? false;
+    } catch (e) {
+      debugPrint('[TaskReminder] 打开通知设置失败: $e');
+      return false;
+    }
+  }
+
+  // ─────────────────────── 提醒可靠性：后台存活 ───────────────────────
+
+  /// 是否已加入「电池优化不受限制」名单。
+  ///
+  /// 闹钟要在后台稳定触发，系统不能随意休眠该进程，这是前置条件之一。
+  /// 未加白名单时部分 ROM 会压制后台唤醒，闹钟可能大幅延迟甚至丢失。
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _alarm.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? false;
+    } catch (e) {
+      debugPrint('[TaskReminder] 读取电池优化状态失败: $e');
+      return false;
+    }
+  }
+
+  /// 跳转到系统的电池优化设置页，引导用户把本 App 加入白名单。
+  Future<bool> openBatteryOptimizationSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _alarm.invokeMethod<bool>('openBatteryOptimizationSettings') ?? false;
+    } catch (e) {
+      debugPrint('[TaskReminder] 打开电池优化设置失败: $e');
+      return false;
     }
   }
 }
