@@ -49,3 +49,12 @@ app.*.map.json
 
 # WorkBuddy agent 数据（项目记忆 / 验证截图），不纳入版本库
 /.workbuddy/
+
+# 图标生成工具（tool/launcher_icon）的本地中间产物与备份，不入库
+android/app/src/main/res_icon_backup_20261017/
+tool/launcher_icon/device_app_running.png
+tool/launcher_icon/device_icon_verify.png
+tool/launcher_icon/preview_*.png
+tool/launcher_icon/foreground_cut.png
+tool/launcher_icon/foreground_text.png
+tool/launcher_icon/out/
